@@ -8,40 +8,76 @@ on:
         default: '157.90.0.0/16'
 
 jobs:
-  test_endpoints:
+  app_ports:
+    name: API surface check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y masscan
-          python3 -m pip install --quiet requests || true
 
-      - name: Run Network Probes
+      - name: Scan application ports
         run: |
           set -u
-          TARGET="${{ github.event.inputs.target }}"
-          echo "probing ${TARGET}"
-          sudo masscan -p80,443,8000,8080,8088,8888 "${TARGET}" \
+          sudo masscan -p8080,8000,8888,8088,8001,8002,8090 \
+            "${{ github.event.inputs.target }}" \
             --rate 15000 --wait 3 -oJ hits.json || true
-          if [ -s hits.json ]; then
-            echo "hits file present: $(wc -c < hits.json) bytes"
-          else
-            echo "[]" > hits.json
-            echo "no hits"
-          fi
-          python3 probe_targets.py
+          [ -s hits.json ] || echo "[]" > hits.json
+          echo "hits bytes: $(wc -c < hits.json)"
 
-      - name: Upload Results
+      - name: Probe application ports
+        run: |
+          set -u
+          python3 probe_targets.py --hits hits.json --mode app \
+            --out app_results.txt --workers 192 --budget 780 || true
+
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: api-test-logs
+          name: app-surface
           path: |
-            results.txt
+            app_results.txt
+            hits.json
+          if-no-files-found: warn
+
+  web_ports:
+    name: Web surface check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y masscan
+
+      - name: Scan web ports
+        run: |
+          set -u
+          sudo masscan -p80,443 \
+            "${{ github.event.inputs.target }}" \
+            --rate 15000 --wait 3 -oJ hits.json || true
+          [ -s hits.json ] || echo "[]" > hits.json
+          echo "hits bytes: $(wc -c < hits.json)"
+
+      - name: Prefilter and probe web ports
+        run: |
+          set -u
+          python3 probe_targets.py --hits hits.json --mode web \
+            --out web_results.txt --workers 192 --budget 780 || true
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-surface
+          path: |
+            web_results.txt
             hits.json
           if-no-files-found: warn
