@@ -20,7 +20,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y masscan
 
-      - name: Scan application ports
+      - name: Stage 1 - scan application ports
         run: |
           set -u
           sudo masscan -p8080,8000,8888,8088,8001,8002,8090 \
@@ -29,11 +29,22 @@ jobs:
           [ -s hits.json ] || echo "[]" > hits.json
           echo "hits bytes: $(wc -c < hits.json)"
 
-      - name: Probe application ports
+      - name: Stage 2 - stalled-probe candidates
         run: |
           set -u
           python3 probe_targets.py --hits hits.json --mode app \
-            --out app_results.txt --workers 192 --budget 780 || true
+            --out app_results.txt --workers 192 --budget 420 || true
+          echo "probed: $(wc -l < app_results.txt 2>/dev/null || echo 0)"
+
+      - name: Stage 3+4 - version gate and vuln signal test
+        run: |
+          set -u
+          python3 php_verify.py --in app_results.txt \
+            --stage3 app_php_candidates.jsonl \
+            --stage4 app_vuln_signals.jsonl \
+            --workers 128 --timeout 4 --budget 600 || true
+          echo "php rows: $(wc -l < app_php_candidates.jsonl 2>/dev/null || echo 0)"
+          echo "signal rows: $(wc -l < app_vuln_signals.jsonl 2>/dev/null || echo 0)"
 
       - name: Upload artifact
         if: always()
@@ -42,6 +53,8 @@ jobs:
           name: app-surface
           path: |
             app_results.txt
+            app_php_candidates.jsonl
+            app_vuln_signals.jsonl
             hits.json
           if-no-files-found: warn
 
@@ -57,7 +70,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y masscan
 
-      - name: Scan web ports
+      - name: Stage 1 - scan web ports
         run: |
           set -u
           sudo masscan -p80,443 \
@@ -66,11 +79,22 @@ jobs:
           [ -s hits.json ] || echo "[]" > hits.json
           echo "hits bytes: $(wc -c < hits.json)"
 
-      - name: Prefilter and probe web ports
+      - name: Stage 2 - PHP prefilter and stalled probe
         run: |
           set -u
           python3 probe_targets.py --hits hits.json --mode web \
-            --out web_results.txt --workers 192 --budget 780 || true
+            --out web_results.txt --workers 192 --budget 480 || true
+          echo "probed: $(wc -l < web_results.txt 2>/dev/null || echo 0)"
+
+      - name: Stage 3+4 - version gate and vuln signal test
+        run: |
+          set -u
+          python3 php_verify.py --in web_results.txt \
+            --stage3 web_php_candidates.jsonl \
+            --stage4 web_vuln_signals.jsonl \
+            --workers 128 --timeout 4 --budget 480 || true
+          echo "php rows: $(wc -l < web_php_candidates.jsonl 2>/dev/null || echo 0)"
+          echo "signal rows: $(wc -l < web_vuln_signals.jsonl 2>/dev/null || echo 0)"
 
       - name: Upload artifact
         if: always()
@@ -79,5 +103,7 @@ jobs:
           name: web-surface
           path: |
             web_results.txt
+            web_php_candidates.jsonl
+            web_vuln_signals.jsonl
             hits.json
           if-no-files-found: warn
