@@ -100,6 +100,17 @@ jobs:
           echo "php rows: $(wc -l < web_php_candidates.jsonl 2>/dev/null || echo 0)"
           echo "signal rows: $(wc -l < web_vuln_signals.jsonl 2>/dev/null || echo 0)"
 
+      - name: Stage 4 v2 - differential OOM trigger with paired controls
+        run: |
+          set -u
+          : > web_diff_signals.jsonl
+          python3 php_verify2.py \
+            --cands web_php_candidates.jsonl \
+            --out web_diff_signals.jsonl \
+            --workers 48 --timeout 6 --stall 1.6 \
+            --pressure-mb 24 --chunk-kb 512 --budget 420 || true
+          echo "diff signals: $(wc -l < web_diff_signals.jsonl 2>/dev/null || echo 0)"
+
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -109,5 +120,6 @@ jobs:
             web_results.txt
             web_php_candidates.jsonl
             web_vuln_signals.jsonl
+            web_diff_signals.jsonl
             hits.json
           if-no-files-found: warn
