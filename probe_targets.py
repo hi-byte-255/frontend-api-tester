@@ -128,11 +128,28 @@ def main():
         pending = {}
         queue = list(targets)
 
+        # Stage the PHP prefilter in PARALLEL. A serial HEAD against tarpit
+        # hosts (accept + never reply) costs up to `timeout` per host, which
+        # starves the whole budget before a single real probe runs — the
+        # exact web-job failure (mode=web 41805 candidates -> 0 tested).
+        if args.mode == "web":
+            pf_timeout = max(1.0, min(args.timeout, 2.0))
+            survivors = set()
+            with ThreadPoolExecutor(max_workers=args.workers) as pf_pool:
+                fut2t = {
+                    pf_pool.submit(head_looks_like_php, h, p, pf_timeout): (h, p)
+                    for h, p in queue
+                }
+                for fut in as_completed(fut2t):
+                    try:
+                        if fut.result():
+                            survivors.add(fut2t[fut])
+                    except Exception:  # noqa: BLE001
+                        pass
+            print(f"prefilter survivors: {len(survivors)}/{len(queue)}", flush=True)
+            queue = [(h, p) for (h, p) in queue if (h, p) in survivors]
+
         def admit(host, port):
-            if args.mode == "web" and not head_looks_like_php(
-                host, port, args.timeout
-            ):
-                return None
             return pool.submit(
                 stalled_multipart_probe, host, port, args.stall, args.timeout
             )
