@@ -82,13 +82,17 @@ jobs:
       - name: Stage 2 - PHP prefilter and stalled probe
         run: |
           set -u
+          : > web_results.txt
           python3 probe_targets.py --hits hits.json --mode web \
             --out web_results.txt --workers 192 --budget 480 || true
+          [ -s web_results.txt ] || echo "# no rows" >> web_results.txt
           echo "probed: $(wc -l < web_results.txt 2>/dev/null || echo 0)"
 
       - name: Stage 3+4 - version gate and vuln signal test
         run: |
           set -u
+          : > web_php_candidates.jsonl
+          : > web_vuln_signals.jsonl
           python3 php_verify.py --in web_results.txt \
             --stage3 web_php_candidates.jsonl \
             --stage4 web_vuln_signals.jsonl \
